@@ -1,15 +1,18 @@
+#include <PubSubClient.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
-#include <PubSubClient.h>
+#include <ArduinoJson.h>
 
-const char WiFiSSID[] = "#################";     //### your Router SSID
-const char WiFiPSK[]  = "#################"; //### your Router Password
-IPAddress ip(192, 168, 42, 10); //Node static IP
+const char WiFiSSID[] = "security-by-iod";     //### your Router SSID
+const char WiFiPSK[]  = "########"; //### your Router Password
+uint8_t MAC_array[6];
+char MAC_char[18];
+IPAddress ip(192, 168, 42, 12); //Node static IP
 IPAddress gateway(192,168,42,254);
 IPAddress subnet(255, 255, 255, 0);
-IPAddress mqtt_server(192,168,3,233);               //mqtt server ip
+IPAddress mqtt_server(192,168,3,241);               //mqtt server ip
 const int mqtt_port = 1883;                         //mqtt server port
-const char* mqtt_topic = "sensor/door/test";        //mqtt topic
+const char* mqtt_topic = "sensors/all";        //mqtt topic
 const char* mqtt_client_id = "IoT-Test-ESP8266";    //mqtt client id
 
 WiFiClient wifi_client;
@@ -22,6 +25,9 @@ const int switchState = 3;   // gpio 3 reads the state of the activator switch
 char str[30];                 // publishing string
 bool mqtt_con_state = false;  // mqtt connection state
 
+StaticJsonBuffer<200> jsonBuffer;	// reserve 200Bytes for json-foo
+
+ADC_MODE(ADC_VCC); // needed to use ESP.getVcc()
 
 void blink(int count, bool long_blink){
   int blink_time = 10;
@@ -50,7 +56,7 @@ bool isConnected(long timeOutSec)
     }
     z++;
   }
-  mqtt_con_state = mqtt_client.connect(mqtt_client_id, mqtt_topic, 0, 0, "Connected");
+  mqtt_con_state = mqtt_client.connect(mqtt_client_id, mqtt_topic, 0, 0, "Connected");		
   return mqtt_con_state;
 }
 
@@ -68,8 +74,14 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.begin(WiFiSSID, WiFiPSK);
 
+  WiFi.macAddress(MAC_array);
+  for (int i = 0; i < sizeof(MAC_array); ++i){
+    sprintf(MAC_char, "%s%02x:", MAC_char, MAC_array[i]);
+  }
+  mqtt_client_id = MAC_char;
+
   isConnected(20);            // try 20 seconds to connect to wifi access point ..
-    
+
 }
 
 /*
@@ -78,7 +90,20 @@ void setup() {
 bool mqtt_publish(int status){
   if (mqtt_con_state) {
     sprintf(str, "status: %d", status);
-    mqtt_client.publish("testTopic", str); //Publish/send message to clound on outTopic    
+	  
+	JsonObject& json_object = jsonBuffer.createObject();
+    json_object["esp-id"] = MAC_char;
+	if(status == 1) {
+        json_object["switch_closed"] = true;
+	} else {
+		json_object["switch_closed"] = false;
+	}
+	json_object["esp_voltage_mV"] = ESP.getVcc();
+	
+	char json_string[256];
+	json_object.printTo(json_string, sizeof(json_string));
+	  
+    mqtt_client.publish(mqtt_topic, json_string); //Publish/send message to clound on outTopic    
     return true;
   } else {
     return false;
